@@ -1,17 +1,42 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App';
-import reportWebVitals from './reportWebVitals';
+import {
+    MyEditor,
+    LinkEditor,
+    EntityEditor,
+    TweetEditor,
+    TeXEditor,
+    MediaEditor,
+    ColorfulEditor
+} from "./components/draftDemo";
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+import Game from "./components/tic-tac-toe";
+import Calculator from "./components/calculator";
+import Faceless from "./components/faceless";
 
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();
+// ========================================
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+// root.render(<Game />);
+// root.render(<Calculator/>);
+// root.render(<MyEditor />);
+// root.render(<LinkEditor />);
+// root.render(<EntityEditor />);
+// root.render(<TweetEditor />);
+// root.render(<TeXEditor />);
+// root.render(<MediaEditor />);
+// root.render(<ColorfulEditor/>);
+const complex =
+    <div>
+        <MyEditor/>
+        <LinkEditor/>
+        <EntityEditor/>
+        <TweetEditor/>
+        <TeXEditor/>
+        <MediaEditor/>
+        <ColorfulEditor/>
+    </div>;
+
+root.render(<Faceless/>);
+// root.render(complex);
