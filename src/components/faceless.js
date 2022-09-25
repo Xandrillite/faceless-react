@@ -1,8 +1,9 @@
 import React from "react";
-import {Editor, EditorState, getDefaultKeyBinding, Modifier, SelectionState} from "draft-js";
-import {RichUtils} from "_draft-js@0.11.7@draft-js";
+import {Editor, EditorState, getDefaultKeyBinding, Modifier, RichUtils} from "draft-js";
 
 import 'draft-js/dist/Draft.css';
+import './faceless.css';
+import Immutable from "_immutable@4.1.0@immutable";
 
 class Faceless extends React.Component {
     constructor(props) {
@@ -19,12 +20,41 @@ class Faceless extends React.Component {
         this.handleKeyCommand = this._handleKeyCommand.bind(this);
         this.mapKeyToEditorCommand = this._mapKeyToEditorCommand.bind(this);
         this.handleBeforeInput = this._handleBeforeInput.bind(this);
+        this.handleReturn = this._handleReturn.bind(this);
     }
 
     _handleKeyCommand(command, editorState, eventTimestamp) {
-        let newEditorState;
+        let newEditorState = editorState;
 
-        newEditorState = RichUtils.handleKeyCommand(editorState, command);
+        let selection = newEditorState.getSelection();
+
+        if (command === 'backspace' && selection.isCollapsed()) {
+            let text = newEditorState.getCurrentContent().getPlainText();
+            if (pairs[text.charAt(selection.getAnchorOffset() - 1)] === text.charAt(selection.getAnchorOffset())) {
+                newEditorState = EditorState.push(
+                    newEditorState,
+                    Modifier.replaceText(
+                        newEditorState.getCurrentContent(),
+                        selection.merge({
+                            anchorOffset: selection.getAnchorOffset() - 1,
+                            focusOffset: selection.getFocusOffset() + 1
+                        }),
+                        '',
+                    ),
+                    'delete-character'
+                );
+                this.onChange(newEditorState);
+                return 'handled';
+            }
+        }
+
+        // if (command === 'split-block') {
+        //     newEditorState = keyCommandInsertNewline(newEditorState);
+        //     this.onChange(newEditorState);
+        //     return 'handled';
+        // }
+
+        newEditorState = RichUtils.handleKeyCommand(newEditorState, command);
         if (newEditorState) {
             this.onChange(newEditorState);
             return 'handled';
@@ -39,14 +69,13 @@ class Faceless extends React.Component {
     _handleBeforeInput(character, editorState) {
         let newEditorState = editorState;
 
-        let matcher = pairs[character];
-        if (matcher) {
+        if (pairs[character]) {
             newEditorState = EditorState.push(
                 editorState,
                 Modifier.insertText(
                     editorState.getCurrentContent(),
                     editorState.getSelection(),
-                    character + matcher,
+                    character + pairs[character],
                 ),
                 'insert-characters'
             );
@@ -75,15 +104,9 @@ class Faceless extends React.Component {
         let position = selection.getAnchorOffset();
         let newEditorState = editorState;
 
+        // derender the selection
         block.getInlineStyleAt(position - 1).map((value, index, array) => {
-            let decorator;
-            switch (value) {
-                case 'BOLD':
-                    decorator = inlineDecorators[value];
-                    break;
-                default:
-                    decorator = '';
-            }
+            let decorator = inlineDecorators[value];
             block.findStyleRanges((metadata) => {
                 return metadata.getStyle().has(value);
             }, (start, end) => {
@@ -111,20 +134,55 @@ class Faceless extends React.Component {
             });
         });
 
-        let matchArr;
+        if (block.getType() === 'unstyled') {
+            // render block type
+            Object.keys(blockTypeRegex).some((key) => {
+                const re = new RegExp(blockTypeRegex[key]);
+                let matchArr = re.exec(text);
+                if (matchArr) {
+                    let newPosition = position - matchArr[1].length
+                    newEditorState = EditorState.push(
+                        newEditorState,
+                        Modifier.replaceText(
+                            contentState,
+                            selection.merge({
+                                anchorOffset: matchArr.index,
+                                focusOffset: matchArr.index + matchArr[0].length,
+                            }),
+                            matchArr[2]
+                        ),
+                        'delete-character'
+                    );
+                    newEditorState = EditorState.forceSelection(
+                        newEditorState,
+                        newEditorState.getSelection().merge({
+                            anchorOffset: newPosition,
+                            focusOffset: newPosition,
+                        })
+                    );
+                    newEditorState = RichUtils.toggleBlockType(
+                        newEditorState,
+                        key,
+                    );
+                }
+            });
+        }
+
+        // render the inline styles
         Object.keys(inlineStyleRegex).some((key) => {
             const re = new RegExp(inlineStyleRegex[key]);
-            matchArr = re.exec(text);
+            let matchArr = re.exec(text);
             if (matchArr) {
                 if (!(selection.getAnchorOffset() > matchArr.index
                     && selection.getAnchorOffset() < matchArr.index + matchArr[0].length + 1)) {
-                    position += (selection.getAnchorOffset() <= matchArr.index) ? 0 : -(inlineDecorators[key].length * 2);
+                    let newPosition = position -
+                    (position <= matchArr.index ? 0 : (inlineDecorators[key].length * 2));
                     newEditorState = EditorState.forceSelection(
                         EditorState.push(
                             newEditorState,
                             Modifier.replaceText(
                                 contentState,
-                                SelectionState.createEmpty(blockKey).merge({
+                                selection.merge({
                                     anchorOffset: matchArr.index,
                                     focusOffset: matchArr.index + matchArr[0].length,
                                 }),
@@ -133,9 +191,9 @@ class Faceless extends React.Component {
                             ),
                             'change-inline-style'
                         ),
-                        SelectionState.createEmpty(blockKey).merge({
-                            anchorOffset: position,
-                            focusOffset: position,
+                        selection.merge({
+                            anchorOffset: newPosition,
+                            focusOffset: newPosition,
                         })
                     );
                     for (const style of newEditorState.getCurrentInlineStyle().values()) {
@@ -151,6 +209,16 @@ class Faceless extends React.Component {
         this.setState({editorState: newEditorState});
     }
 
+    _handleReturn(e, editorState) {
+        let newEditorState = editorState;
+        headerTypes.some((type) => {
+            if (type === newEditorState.getCurrentContent().getBlockForKey(newEditorState.getSelection().getStartKey()).getType()) {
+
+                return true;
+            }
+        });
+    }
+
     render() {
         return (
             <div className="editor-root">
@@ -163,12 +231,39 @@ class Faceless extends React.Component {
                         handleKeyCommand={this.handleKeyCommand}
                         keyBindingFn={this.mapKeyToEditorCommand}
                         handleBeforeInput={this.handleBeforeInput}
+                        handleReturn={this.handleReturn}
+                        // blockRenderMap={blockRenderMap}
                     />
                 </div>
             </div>
         );
     }
 }
+
+const blockTypeRegex = {
+    'header-one': /^(# )(.*)$/,
+    'header-two': /^(## )(.*)$/,
+    'header-three': /^(### )(.*)$/,
+    'header-four': /^(#### )(.*)$/,
+    'header-five': /^(##### )(.*)$/,
+    'header-six': /^(###### )(.*)$/,
+    'unordered-list-item': /^\s*(- )(.*)$/,
+    'ordered-list-item': /^\s*(\d. )(.*)$/,
+    'blockquote': /^\s*(> )(.*)$/,
+    // 'code-block': /^```
+    // 'atomic'
+    // 'paragraph':
+    // 'unstyled
+};
+
+const headerTypes = [
+    'header-one',
+    'header-two',
+    'header-three',
+    'header-four',
+    'header-five',
+    'header-six',
+];
 
 const inlineStyleRegex = {
     BOLD: /\*\*(.+?)\*\*/g,
@@ -191,6 +286,15 @@ const pairs = {
     '(': ')',
     '[': ']',
     '{': '}',
+    '"': '"',
+    "'": "'",
+    // '（': '）',
 }
+
+const blockRenderMap = Immutable.Map({
+    'unstyled': {
+        element: 'p'
+    }
+})
 
 export default Faceless;
