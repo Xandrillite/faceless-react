@@ -1230,7 +1230,6 @@ function mediaBlockRenderer(block) {
         return {
             component: Media,
             editable: false,
-
         };
     }
     return null;

@@ -1,5 +1,13 @@
 import React from "react";
-import {Editor, EditorState, getDefaultKeyBinding, Modifier, RichUtils} from "draft-js";
+import {
+    AtomicBlockUtils,
+    Editor,
+    EditorState,
+    getDefaultKeyBinding,
+    Modifier,
+    RichUtils,
+    SelectionState
+} from "draft-js";
 
 import 'draft-js/dist/Draft.css';
 import './faceless.css';
@@ -206,6 +214,42 @@ class Faceless extends React.Component {
             }
         });
 
+        // render multimedia block
+        Object.keys(mediaTypeRegex).some((key) => {
+            const re = new RegExp(mediaTypeRegex[key]);
+            let matchArr = re.exec(text);
+            if (matchArr) {
+                if (!(selection.getAnchorOffset() > matchArr.index
+                    && selection.getAnchorOffset() < matchArr.index + matchArr[0].length + 1)) {
+                    let contentStateWithEntity = Modifier.replaceText(
+                        contentState,
+                        SelectionState.createEmpty(blockKey).merge({
+                            anchorOffset: matchArr.index,
+                            focusOffset: matchArr.index + matchArr[0].length,
+                        }),
+                        ''
+                    ).createEntity(
+                        key,
+                        'IMMUTABLE',
+                        {src: matchArr[2], alt: matchArr[1], title: matchArr[5]||''}
+                    );
+                    let entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+                    newEditorState = EditorState.set(
+                        newEditorState,
+                        {currentContent: contentStateWithEntity}
+                    );
+                    newEditorState = AtomicBlockUtils.insertAtomicBlock(
+                        newEditorState,
+                        entityKey,
+                        ' ',
+                    );
+                }
+                return true;
+            } else {
+                return false;
+            }
+        });
+
         this.setState({editorState: newEditorState});
     }
 
@@ -232,13 +276,48 @@ class Faceless extends React.Component {
                         keyBindingFn={this.mapKeyToEditorCommand}
                         handleBeforeInput={this.handleBeforeInput}
                         handleReturn={this.handleReturn}
-                        // blockRenderMap={blockRenderMap}
+                        blockRendererFn={atomicBlockRenderer}
                     />
                 </div>
             </div>
         );
     }
 }
+
+function atomicBlockRenderer(block) {
+    if (block.getType() === 'atomic') {
+        return {
+            component: Media,
+            editable: false,
+        };
+    }
+    return null;
+}
+
+const Media = (props) => {
+    const entity = props.contentState.getEntity(
+        props.block.getEntityAt(0)
+    );
+    const data = entity.getData();
+    const type = entity.getType();
+
+    let media;
+    switch (type) {
+        case 'image':
+            media = <img alt={data.alt||''} src={data.src} title={data.title||''} />;
+            break;
+        case 'video':
+            media = <video controls muted autoPlay loop src={data.src} title={data.title||''} />;
+            break;
+    }
+    return media;
+};
+
+const mediaTypeRegex = {
+    'image': /!\[(.*?)]\((.+?(bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg).*?)(\s*"(.*)")?\)/g,
+    'video': /!\[(.*?)]\((.+?(avi|mpg|rm|mov|wav|asf|3gp|mkv|rmvb|mp4|ogg|mp3|oga|aac|mpeg|webm).*?)(\s*"(.*)")?\)/g,
+}
+
 
 const blockTypeRegex = {
     'header-one': /^(# )(.*)$/,
