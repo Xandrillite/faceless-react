@@ -238,7 +238,7 @@ class LinkEditor extends React.Component {
         ]);
 
         this.state = {
-            editorState: EditorState.createEmpty(),
+            editorState: EditorState.createEmpty(decorator),
             showURLInput: false,
             urlValue: '',
         };

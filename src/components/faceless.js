@@ -1,6 +1,6 @@
 import React from "react";
 import {
-    AtomicBlockUtils,
+    AtomicBlockUtils, CompositeDecorator,
     Editor,
     EditorState,
     getDefaultKeyBinding,
@@ -21,8 +21,16 @@ class Faceless extends React.Component {
         this.focus = () => this.domEditor.focus();
         this.onChange = this._onChange.bind(this);
 
+        const decorator = new CompositeDecorator([
+            {
+                strategy: linkStrategy,
+                component: MultiMedia,
+            },
+        ]);
+
+
         this.state = {
-            editorState: EditorState.createEmpty(),
+            editorState: EditorState.createEmpty(decorator),
         };
 
         this.handleKeyCommand = this._handleKeyCommand.bind(this);
@@ -77,6 +85,27 @@ class Faceless extends React.Component {
     _handleBeforeInput(character, editorState) {
         let newEditorState = editorState;
 
+        // complete brackets
+        let text = newEditorState.getCurrentContent().getPlainText();
+        let afterChar = text.charAt(newEditorState.getSelection().getFocusOffset());
+        if (Object.values(pairs).some((pair) => {
+            if (afterChar === pair && pair === character) {
+                newEditorState = EditorState.forceSelection(
+                    newEditorState,
+                    newEditorState.getSelection().merge({
+                        anchorOffset: newEditorState.getSelection().getAnchorOffset() + 1,
+                        focusOffset: newEditorState.getSelection().getFocusOffset() + 1,
+                    })
+                );
+                this.onChange(newEditorState);
+                return true;
+            }
+        })) {
+            this.onChange(newEditorState);
+            return 'handled';
+        }
+
+        // pair brackets
         if (pairs[character]) {
             newEditorState = EditorState.push(
                 editorState,
@@ -96,6 +125,8 @@ class Faceless extends React.Component {
                 })
             );
         }
+
+
         if (newEditorState !== editorState) {
             this.onChange(newEditorState);
             return 'handled';
@@ -113,7 +144,7 @@ class Faceless extends React.Component {
         let newEditorState = editorState;
 
         // derender the selection
-        block.getInlineStyleAt(position - 1).map((value, index, array) => {
+        block.getInlineStyleAt(position - 1).forEach((value) => {
             let decorator = inlineDecorators[value];
             block.findStyleRanges((metadata) => {
                 return metadata.getStyle().has(value);
@@ -122,7 +153,7 @@ class Faceless extends React.Component {
                     newEditorState = EditorState.push(
                         editorState,
                         Modifier.replaceText(
-                            contentState,
+                            newEditorState.getCurrentContent(),
                             selection.merge({
                                 anchorOffset: start,
                                 focusOffset: end,
@@ -152,7 +183,7 @@ class Faceless extends React.Component {
                     newEditorState = EditorState.push(
                         newEditorState,
                         Modifier.replaceText(
-                            contentState,
+                            newEditorState.getCurrentContent(),
                             selection.merge({
                                 anchorOffset: matchArr.index,
                                 focusOffset: matchArr.index + matchArr[0].length,
@@ -184,12 +215,12 @@ class Faceless extends React.Component {
                 if (!(selection.getAnchorOffset() > matchArr.index
                     && selection.getAnchorOffset() < matchArr.index + matchArr[0].length + 1)) {
                     let newPosition = position -
-                    (position <= matchArr.index ? 0 : (inlineDecorators[key].length * 2));
+                        (position <= matchArr.index ? 0 : (inlineDecorators[key].length * 2));
                     newEditorState = EditorState.forceSelection(
                         EditorState.push(
                             newEditorState,
                             Modifier.replaceText(
-                                contentState,
+                                newEditorState.getCurrentContent(),
                                 selection.merge({
                                     anchorOffset: matchArr.index,
                                     focusOffset: matchArr.index + matchArr[0].length,
@@ -221,30 +252,63 @@ class Faceless extends React.Component {
             if (matchArr) {
                 if (!(selection.getAnchorOffset() > matchArr.index
                     && selection.getAnchorOffset() < matchArr.index + matchArr[0].length + 1)) {
-                    let contentStateWithEntity = Modifier.replaceText(
-                        contentState,
-                        SelectionState.createEmpty(blockKey).merge({
-                            anchorOffset: matchArr.index,
-                            focusOffset: matchArr.index + matchArr[0].length,
-                        }),
-                        ''
-                    ).createEntity(
-                        key,
-                        'IMMUTABLE',
-                        {src: matchArr[2], alt: matchArr[1], title: matchArr[5]||''}
-                    );
-                    let entityKey = contentStateWithEntity.getLastCreatedEntityKey();
-                    newEditorState = EditorState.set(
-                        newEditorState,
-                        {currentContent: contentStateWithEntity}
-                    );
-                    newEditorState = AtomicBlockUtils.insertAtomicBlock(
-                        newEditorState,
-                        entityKey,
-                        ' ',
-                    );
+                    if (key === 'hyperlink') {
+                        let contentStateWithEntity = Modifier.replaceText(
+                            newEditorState.getCurrentContent(),
+                            selection.merge({
+                                anchorOffset: matchArr.index,
+                                focusOffset: matchArr.index + matchArr[0].length,
+                            }),
+                            matchArr[1],
+                        );
+                        let entityKey = contentStateWithEntity.createEntity('hyperlink', 'MUTABLE', {
+                            href: matchArr[2], title: matchArr[4],
+                        }).getLastCreatedEntityKey();
+                        newEditorState = RichUtils.toggleLink(
+                            EditorState.set(newEditorState, {
+                                currentContent: contentStateWithEntity,
+                            }),
+                            SelectionState.createEmpty(blockKey).merge({
+                                anchorOffset: matchArr.index,
+                                focusOffset: matchArr.index + matchArr[1].length,
+                            }),
+                            entityKey,
+                        );
+                        newEditorState = EditorState.forceSelection(
+                            newEditorState,
+                            selection.merge({
+                                anchorOffset: matchArr.index + matchArr[1].length,
+                                focusOffset: matchArr.index + matchArr[1].length,
+                            })
+                        );
+                        return true;
+                    } else {
+                        console.log(matchArr);
+                        let contentStateWithEntity = Modifier.replaceText(
+                            newEditorState.getCurrentContent(),
+                            SelectionState.createEmpty(blockKey).merge({
+                                anchorOffset: matchArr.index,
+                                focusOffset: matchArr.index + matchArr[0].length,
+                            }),
+                            ''
+                        ).createEntity(
+                            key,
+                            'IMMUTABLE',
+                            {src: matchArr[2], alt: matchArr[1], title: matchArr[5] || ''}
+                        );
+                        let entityKey = contentStateWithEntity.getLastCreatedEntityKey();
+                        newEditorState = EditorState.set(
+                            newEditorState,
+                            {currentContent: contentStateWithEntity}
+                        );
+                        newEditorState = AtomicBlockUtils.insertAtomicBlock(
+                            newEditorState,
+                            entityKey,
+                            ' ',
+                        );
+                        return true;
+                    }
                 }
-                return true;
             } else {
                 return false;
             }
@@ -284,19 +348,33 @@ class Faceless extends React.Component {
     }
 }
 
+function linkStrategy(contentBlock, callback, contentState) {
+    contentBlock.findEntityRanges(
+        (character) => {
+            const entityKey = character.getEntity();
+            return (
+                entityKey !== null &&
+                contentState.getEntity(entityKey).getType() === 'hyperlink'
+            );
+        },
+        callback
+    );
+}
+
 function atomicBlockRenderer(block) {
     if (block.getType() === 'atomic') {
         return {
-            component: Media,
+            component: MultiMedia,
             editable: false,
         };
     }
     return null;
 }
 
-const Media = (props) => {
+const MultiMedia = (props) => {
+    let entityKey = props.entityKey || props.block.getEntityAt(0);
     const entity = props.contentState.getEntity(
-        props.block.getEntityAt(0)
+        entityKey
     );
     const data = entity.getData();
     const type = entity.getType();
@@ -304,11 +382,15 @@ const Media = (props) => {
     let media;
     switch (type) {
         case 'image':
-            media = <img alt={data.alt||''} src={data.src} title={data.title||''} />;
+            media = <img alt={data.alt || ''} src={data.src} title={data.title || ''}/>;
             break;
         case 'video':
-            media = <video controls muted autoPlay loop src={data.src} title={data.title||''} />;
+            media = <video controls muted autoPlay loop src={data.src} title={data.title || ''}/>;
             break;
+        case 'hyperlink':
+            media = <a href={data.href} title={data.title || ''}>
+                {props.children}
+            </a>;
     }
     return media;
 };
@@ -316,8 +398,8 @@ const Media = (props) => {
 const mediaTypeRegex = {
     'image': /!\[(.*?)]\((.+?(bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg).*?)(\s*"(.*)")?\)/g,
     'video': /!\[(.*?)]\((.+?(avi|mpg|rm|mov|wav|asf|3gp|mkv|rmvb|mp4|ogg|mp3|oga|aac|mpeg|webm).*?)(\s*"(.*)")?\)/g,
+    'hyperlink': /\[(.*?)]\((.+?)(\s*"(.*)")?\)/g,
 }
-
 
 const blockTypeRegex = {
     'header-one': /^(# )(.*)$/,
@@ -349,14 +431,14 @@ const inlineStyleRegex = {
     ITALIC: /\*(.+?)\*/g,
     CODE: /`(.+?)`/g,
     STRIKETHROUGH: /~~(.+?)~~/g,
-}
+};
 
 const inlineDecorators = {
     BOLD: '**',
     ITALIC: '*',
     CODE: '`',
     STRIKETHROUGH: '~~',
-}
+};
 
 const pairs = {
     '*': '*',
@@ -368,7 +450,7 @@ const pairs = {
     '"': '"',
     "'": "'",
     // '（': '）',
-}
+};
 
 const blockRenderMap = Immutable.Map({
     'unstyled': {
