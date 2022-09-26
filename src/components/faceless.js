@@ -143,7 +143,7 @@ class Faceless extends React.Component {
         let position = selection.getAnchorOffset();
         let newEditorState = editorState;
 
-        // derender the selection
+        // derender inline styles
         block.getInlineStyleAt(position - 1).forEach((value) => {
             let decorator = inlineDecorators[value];
             block.findStyleRanges((metadata) => {
@@ -172,6 +172,14 @@ class Faceless extends React.Component {
                 }
             });
         });
+
+        // derender links
+        if (block.getEntityAt(position - 1)) {
+            contentState.getEntity(block.getEntityAt(position - 1)).forEach((type, mutablity, data) => {
+                // console.log(type, mutablity, data);
+
+            });
+        }
 
         if (block.getType() === 'unstyled') {
             // render block type
@@ -277,8 +285,8 @@ class Faceless extends React.Component {
                         newEditorState = EditorState.forceSelection(
                             newEditorState,
                             selection.merge({
-                                anchorOffset: matchArr.index + matchArr[1].length,
-                                focusOffset: matchArr.index + matchArr[1].length,
+                                anchorOffset: selection.getAnchorOffset() - 2 - 2 - matchArr[2].length - (matchArr[3] ? matchArr[3].length : 0),
+                                focusOffset: selection.getAnchorOffset() - 2 - 2 - matchArr[2].length - (matchArr[3] ? matchArr[3].length : 0),
                             })
                         );
                         return true;
