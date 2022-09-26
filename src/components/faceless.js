@@ -175,10 +175,36 @@ class Faceless extends React.Component {
 
         // derender links
         if (block.getEntityAt(position - 1)) {
-            contentState.getEntity(block.getEntityAt(position - 1)).forEach((type, mutablity, data) => {
-                // console.log(type, mutablity, data);
-
-            });
+            let entity = contentState.getEntity(block.getEntityAt(position - 1));
+            if (entity.getType() === 'hyperlink') {
+                block.findEntityRanges((metadata) => {
+                    return metadata.getEntity() === block.getEntityAt(position - 1);
+                }, (start, end) => {
+                    if (position >= start && position <= end) {
+                        newEditorState = EditorState.push(
+                            editorState,
+                            Modifier.replaceText(
+                                newEditorState.getCurrentContent(),
+                                selection.merge({
+                                    anchorOffset: start,
+                                    focusOffset: end,
+                                }),
+                                '[' + contentState.getPlainText().slice(start, end) + '](' +
+                                entity.getData().href + (entity.getData().title ? ' "' + entity.getData().title + '")' :
+                                        ')'),
+                            ),
+                            'insert-characters'
+                        );
+                        newEditorState = EditorState.forceSelection(
+                            newEditorState,
+                            selection.merge({
+                                anchorOffset: position + 1,
+                                focusOffset: position + 1,
+                            })
+                        );
+                    }
+                })
+            }
         }
 
         if (block.getType() === 'unstyled') {
