@@ -86,9 +86,10 @@ class Faceless extends React.Component {
         let newEditorState = editorState;
 
         // complete brackets
-        let text = newEditorState.getCurrentContent().getPlainText();
+        let text = newEditorState.getCurrentContent().getBlockForKey(newEditorState.getSelection().getStartKey()).getText();
         let afterChar = text.charAt(newEditorState.getSelection().getFocusOffset());
         if (Object.values(pairs).some((pair) => {
+            console.log(text, afterChar, pair, character, newEditorState.getSelection().getFocusOffset());
             if (afterChar === pair && pair === character) {
                 newEditorState = EditorState.forceSelection(
                     newEditorState,
@@ -101,7 +102,6 @@ class Faceless extends React.Component {
                 return true;
             }
         })) {
-            this.onChange(newEditorState);
             return 'handled';
         }
 
