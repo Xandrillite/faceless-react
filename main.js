@@ -6,21 +6,29 @@ function createWindow () {
         width: 800,
         height: 600,
         webPreferences: {
-            // preload: path.join(__dirname, 'preload.js')
-            nodeIntegration: true
+            preload: path.join(__dirname, 'preload.js')
+            // nodeIntegration: true
         }
     })
 
-    win.loadURL('http://localhost:3000');
+    // win.loadURL('http://localhost:3000');
+    win.loadFile('build/index.html').then(
+        () => win.webContents.openDevTools()
+    );
+    return win;
 }
 
 app.whenReady().then(() => {
-    createWindow()
+    const win = createWindow()
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
             createWindow()
         }
+    })
+
+    window.addEventListener('resize', () => {
+        win.webContents.send('update-window-size', window.innerHeight, window.innerWidth);
     })
 })
 

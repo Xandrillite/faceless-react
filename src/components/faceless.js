@@ -1,12 +1,15 @@
 import React from "react";
 import {
-    AtomicBlockUtils, CompositeDecorator,
+    AtomicBlockUtils,
+    CompositeDecorator,
     Editor,
     EditorState,
     getDefaultKeyBinding,
     Modifier,
     RichUtils,
-    SelectionState
+    SelectionState,
+    DefaultDraftBlockRenderMap,
+    EditorBlock
 } from "draft-js";
 
 import 'draft-js/dist/Draft.css';
@@ -62,13 +65,10 @@ class Faceless extends React.Component {
                 this.onChange(newEditorState);
                 return 'handled';
             }
+            if (RichUtils.getCurrentBlockType(newEditorState) === 'paragraph') {
+                newEditorState = RichUtils.toggleBlockType(newEditorState, 'paragraph');
+            }
         }
-
-        // if (command === 'split-block') {
-        //     newEditorState = keyCommandInsertNewline(newEditorState);
-        //     this.onChange(newEditorState);
-        //     return 'handled';
-        // }
 
         newEditorState = RichUtils.handleKeyCommand(newEditorState, command);
         if (newEditorState) {
@@ -89,7 +89,6 @@ class Faceless extends React.Component {
         let text = newEditorState.getCurrentContent().getBlockForKey(newEditorState.getSelection().getStartKey()).getText();
         let afterChar = text.charAt(newEditorState.getSelection().getFocusOffset());
         if (Object.values(pairs).some((pair) => {
-            console.log(text, afterChar, pair, character, newEditorState.getSelection().getFocusOffset());
             if (afterChar === pair && pair === character) {
                 newEditorState = EditorState.forceSelection(
                     newEditorState,
@@ -143,6 +142,18 @@ class Faceless extends React.Component {
         let position = selection.getAnchorOffset();
         let newEditorState = editorState;
 
+        // eliminate header type in a next header
+        if (headerTypes.find((value) => {
+            if (contentState.getKeyBefore(blockKey)) {
+                return contentState.getBlockForKey(contentState.getKeyBefore(blockKey)).getType() === value && RichUtils.getCurrentBlockType(newEditorState) === value;
+            }
+        })) {
+            newEditorState = RichUtils.toggleBlockType(
+                newEditorState,
+                RichUtils.getCurrentBlockType(newEditorState)
+            );
+        }
+
         // derender inline styles
         block.getInlineStyleAt(position - 1).forEach((value) => {
             let decorator = inlineDecorators[value];
@@ -191,7 +202,7 @@ class Faceless extends React.Component {
                                 }),
                                 '[' + contentState.getPlainText().slice(start, end) + '](' +
                                 entity.getData().href + (entity.getData().title ? ' "' + entity.getData().title + '")' :
-                                        ')'),
+                                    ')'),
                             ),
                             'insert-characters'
                         );
@@ -208,6 +219,13 @@ class Faceless extends React.Component {
         }
 
         if (block.getType() === 'unstyled') {
+            newEditorState = RichUtils.toggleBlockType(
+                newEditorState,
+                'paragraph',
+            );
+        }
+
+        if (!Object.keys(blockTypeRegex).some((key) => RichUtils.getCurrentBlockType(newEditorState) === key)) {
             // render block type
             Object.keys(blockTypeRegex).some((key) => {
                 const re = new RegExp(blockTypeRegex[key]);
@@ -353,12 +371,19 @@ class Faceless extends React.Component {
 
     _handleReturn(e, editorState) {
         let newEditorState = editorState;
-        headerTypes.some((type) => {
-            if (type === newEditorState.getCurrentContent().getBlockForKey(newEditorState.getSelection().getStartKey()).getType()) {
-
-                return true;
+        if (RichUtils.getCurrentBlockType(newEditorState) === 'blockquote') {
+            if (e.ctrlKey) {
+                return 'not-handled';
             }
-        });
+            newEditorState = RichUtils.insertSoftNewline(newEditorState);
+            this.onChange(newEditorState);
+            return 'handled';
+        }
+        if (headerTypes.some((type) => {
+            return type === RichUtils.getCurrentBlockType(newEditorState);
+        })) {
+            // newEditorState = RichUtils.insertSoftNewline();
+        }
     }
 
     render() {
@@ -374,7 +399,7 @@ class Faceless extends React.Component {
                         keyBindingFn={this.mapKeyToEditorCommand}
                         handleBeforeInput={this.handleBeforeInput}
                         handleReturn={this.handleReturn}
-                        blockRendererFn={atomicBlockRenderer}
+                        blockRendererFn={BlockRenderer}
                     />
                 </div>
             </div>
@@ -395,12 +420,13 @@ function linkStrategy(contentBlock, callback, contentState) {
     );
 }
 
-function atomicBlockRenderer(block) {
-    if (block.getType() === 'atomic') {
-        return {
-            component: MultiMedia,
-            editable: false,
-        };
+function BlockRenderer(block) {
+    switch (block.getType()) {
+        case 'atomic':
+            return {
+                component: MultiMedia,
+                editable: false,
+            };
     }
     return null;
 }
@@ -430,10 +456,11 @@ const MultiMedia = (props) => {
 };
 
 const mediaTypeRegex = {
-    'image': /!\[(.*?)]\((.+?(bmp|jpg|png|tif|gif|pcx|tga|exif|fpx|svg|psd|cdr|pcd|dxf|ufo|eps|ai|raw|WMF|webp|jpeg).*?)(\s*"(.*)")?\)/g,
-    'video': /!\[(.*?)]\((.+?(avi|mpg|rm|mov|wav|asf|3gp|mkv|rmvb|mp4|ogg|mp3|oga|aac|mpeg|webm).*?)(\s*"(.*)")?\)/g,
+    'image': /!\[(.*?)]\((.+?(bmp|jpg|jpeg|png|gif|tif|tiff|dib|psd|raw|pxr|mac|tga|vst|pcd|pct|ai|fpx|cal|img|wi|eps|ico|cr2|crw|cur|ani).*?)(\s*"(.*)")?\)/g,
+    'video': /!\[(.*?)]\((.+?(asf|avi|wm|wmp|wmv|rm|rmvb|rp|rpm|rt|smi|smil|m1v|m2p|m2t|m2ts|m2v|mp2v|mpe|mpeg|mpg|mpv2|pss|pva|tp|tpr|ts|m4b|m4p|m4v|mp4|mpeg4|3g2|3gp|3gp2|3gpp|mov|qt|f4v|flv|hlv|swf|ifo|vob|amv|bik|csf|divx|evo|ivm|mkv|mod|mts|ogm|pmp|scm|tod|vp6|webm|xlmv|asx|cue|m3u|pls|qpl).*?)(\s*"(.*)")?\)/g,
+    'audio': /!\[(.*?)]\((.+?(aac|ac3|amr|ape|cda|dts|flac|m1a|m2a|m4a|mid|midi|mka|mp2|mp3|mpa|ogg|ra|tak|tta|wav|wma|wv|ram|kpl|smpl).*?)(\s*"(.*)")?\)/g,
     'hyperlink': /\[(.*?)]\((.+?)(\s*"(.*)")?\)/g,
-}
+};
 
 const blockTypeRegex = {
     'header-one': /^(# )(.*)$/,
@@ -486,10 +513,6 @@ const pairs = {
     // '（': '）',
 };
 
-const blockRenderMap = Immutable.Map({
-    'unstyled': {
-        element: 'p'
-    }
-})
+
 
 export default Faceless;
