@@ -8,13 +8,10 @@ import {
     Modifier,
     RichUtils,
     SelectionState,
-    DefaultDraftBlockRenderMap,
-    EditorBlock
 } from "draft-js";
 
 import 'draft-js/dist/Draft.css';
 import './faceless.css';
-import Immutable from "_immutable@4.1.0@immutable";
 
 class Faceless extends React.Component {
     constructor(props) {
@@ -50,6 +47,7 @@ class Faceless extends React.Component {
         if (command === 'backspace' && selection.isCollapsed()) {
             let text = newEditorState.getCurrentContent().getPlainText();
             if (pairs[text.charAt(selection.getAnchorOffset() - 1)] === text.charAt(selection.getAnchorOffset())) {
+                // delete pair brackets
                 newEditorState = EditorState.push(
                     newEditorState,
                     Modifier.replaceText(
@@ -66,7 +64,8 @@ class Faceless extends React.Component {
                 return 'handled';
             }
             if (RichUtils.getCurrentBlockType(newEditorState) === 'paragraph') {
-                newEditorState = RichUtils.toggleBlockType(newEditorState, 'paragraph');
+                // delete paragraph block
+                newEditorState = RichUtils.toggleBlockType(newEditorState, 'unstyled');
             }
         }
 
@@ -84,52 +83,47 @@ class Faceless extends React.Component {
 
     _handleBeforeInput(character, editorState) {
         let newEditorState = editorState;
+        let selection = newEditorState.getSelection();
+        let contentState = newEditorState.getCurrentContent();
 
-        // complete brackets
-        let text = newEditorState.getCurrentContent().getBlockForKey(newEditorState.getSelection().getStartKey()).getText();
-        let afterChar = text.charAt(newEditorState.getSelection().getFocusOffset());
-        if (Object.values(pairs).some((pair) => {
-            if (afterChar === pair && pair === character) {
-                newEditorState = EditorState.forceSelection(
+        if (selection.isCollapsed()) {
+            // complete brackets
+            let afterChar = contentState.getBlockForKey(selection.getStartKey()).getText().charAt(selection.getFocusOffset());
+            if (afterChar === character) {
+                if (Object.values(pairs).includes(character)) {
+                    newEditorState = EditorState.forceSelection(
+                        newEditorState,
+                        selection.merge({
+                            anchorOffset: selection.getAnchorOffset() + 1,
+                            focusOffset: selection.getFocusOffset() + 1,
+                        })
+                    );
+                    this.onChange(newEditorState);
+                    return 'handled';
+                }
+            }
+
+            // pair brackets
+            if (pairs[character]) {
+                newEditorState = EditorState.set(
                     newEditorState,
-                    newEditorState.getSelection().merge({
-                        anchorOffset: newEditorState.getSelection().getAnchorOffset() + 1,
-                        focusOffset: newEditorState.getSelection().getFocusOffset() + 1,
-                    })
+                    {
+                        currentContent: Modifier.insertText(
+                            contentState,
+                            selection,
+                            character + pairs[character],
+                        ),
+                        selection: selection.merge({
+                            anchorOffset: selection.getAnchorOffset() + 1,
+                            focusOffset: selection.getFocusOffset() + 1,
+                        })
+                    }
                 );
                 this.onChange(newEditorState);
-                return true;
+                return 'handled';
             }
-        })) {
-            return 'handled';
         }
 
-        // pair brackets
-        if (pairs[character]) {
-            newEditorState = EditorState.push(
-                editorState,
-                Modifier.insertText(
-                    editorState.getCurrentContent(),
-                    editorState.getSelection(),
-                    character + pairs[character],
-                ),
-                'insert-characters'
-            );
-
-            newEditorState = EditorState.acceptSelection(
-                newEditorState,
-                newEditorState.getSelection().merge({
-                    anchorOffset: newEditorState.getSelection().getAnchorOffset() - 1,
-                    focusOffset: newEditorState.getSelection().getFocusOffset() - 1,
-                })
-            );
-        }
-
-
-        if (newEditorState !== editorState) {
-            this.onChange(newEditorState);
-            return 'handled';
-        }
         return 'not-handled';
     }
 
@@ -139,9 +133,11 @@ class Faceless extends React.Component {
         let blockKey = selection.getStartKey();
         let block = contentState.getBlockForKey(blockKey);
         let text = block.getText();
-        let position = selection.getAnchorOffset();
+        let anchorOffset = selection.getAnchorOffset();
+        let focusOffset = selection.getFocusOffset();
         let newEditorState = editorState;
 
+        // console.log(...contentState.getBlocksAsArray());
         // eliminate header type in a next header
         if (headerTypes.find((value) => {
             if (contentState.getKeyBefore(blockKey)) {
@@ -150,48 +146,52 @@ class Faceless extends React.Component {
         })) {
             newEditorState = RichUtils.toggleBlockType(
                 newEditorState,
-                RichUtils.getCurrentBlockType(newEditorState)
+                'paragraph',
             );
         }
 
         // derender inline styles
-        block.getInlineStyleAt(position - 1).forEach((value) => {
+        block.getInlineStyleAt(anchorOffset - 1).forEach((value) => {
             let decorator = inlineDecorators[value];
             block.findStyleRanges((metadata) => {
-                return metadata.getStyle().has(value);
+                return metadata.hasStyle(value);
             }, (start, end) => {
-                if (position >= start && position <= end) {
-                    newEditorState = EditorState.push(
-                        editorState,
-                        Modifier.replaceText(
-                            newEditorState.getCurrentContent(),
-                            selection.merge({
-                                anchorOffset: start,
-                                focusOffset: end,
-                            }),
-                            decorator + block.getText().slice(start, end) + decorator,
-                        ),
-                        'insert-characters'
-                    );
-                    newEditorState = EditorState.forceSelection(
+                if (anchorOffset >= start && anchorOffset <= end) {
+                    newEditorState = EditorState.set(
                         newEditorState,
-                        selection.merge({
-                            anchorOffset: position + decorator.length,
-                            focusOffset: position + decorator.length,
-                        })
+                        {
+                            currentContent: Modifier.replaceText(
+                                newEditorState.getCurrentContent(),
+                                selection.merge({
+                                    anchorOffset: start,
+                                    focusOffset: end,
+                                    isBackward: false,
+                                }),
+                                decorator + block.getText().slice(start, end) + decorator,
+                            ),
+                            selection: selection.getIsBackward() ? selection.merge({
+                                anchorOffset: anchorOffset + decorator.length,
+                                focusOffset: focusOffset + (focusOffset < start ? 0 : decorator.length),
+                            }) : selection.merge({
+                                anchorOffset: anchorOffset + decorator.length,
+                                focusOffset: focusOffset + (focusOffset > end ? 2 : 1) * decorator.length,
+                                isBackward: false,
+                            }),
+                            forceSelection: true
+                        }
                     );
                 }
             });
         });
 
         // derender links
-        if (block.getEntityAt(position - 1)) {
-            let entity = contentState.getEntity(block.getEntityAt(position - 1));
+        if (block.getEntityAt(anchorOffset - 1)) {
+            let entity = contentState.getEntity(block.getEntityAt(anchorOffset - 1));
             if (entity.getType() === 'hyperlink') {
                 block.findEntityRanges((metadata) => {
-                    return metadata.getEntity() === block.getEntityAt(position - 1);
+                    return metadata.getEntity() === block.getEntityAt(anchorOffset - 1);
                 }, (start, end) => {
-                    if (position >= start && position <= end) {
+                    if (anchorOffset >= start && anchorOffset <= end) {
                         newEditorState = EditorState.push(
                             editorState,
                             Modifier.replaceText(
@@ -209,8 +209,8 @@ class Faceless extends React.Component {
                         newEditorState = EditorState.forceSelection(
                             newEditorState,
                             selection.merge({
-                                anchorOffset: position + 1,
-                                focusOffset: position + 1,
+                                anchorOffset: anchorOffset + 1,
+                                focusOffset: anchorOffset + 1,
                             })
                         );
                     }
@@ -231,7 +231,7 @@ class Faceless extends React.Component {
                 const re = new RegExp(blockTypeRegex[key]);
                 let matchArr = re.exec(text);
                 if (matchArr) {
-                    let newPosition = position - matchArr[1].length
+                    let newPosition = anchorOffset - matchArr[1].length
                     newEditorState = EditorState.push(
                         newEditorState,
                         Modifier.replaceText(
@@ -266,8 +266,8 @@ class Faceless extends React.Component {
             if (matchArr) {
                 if (!(selection.getAnchorOffset() > matchArr.index
                     && selection.getAnchorOffset() < matchArr.index + matchArr[0].length + 1)) {
-                    let newPosition = position -
-                        (position <= matchArr.index ? 0 : (inlineDecorators[key].length * 2));
+                    let newPosition = anchorOffset -
+                        (anchorOffset <= matchArr.index ? 0 : (inlineDecorators[key].length * 2));
                     newEditorState = EditorState.forceSelection(
                         EditorState.push(
                             newEditorState,
